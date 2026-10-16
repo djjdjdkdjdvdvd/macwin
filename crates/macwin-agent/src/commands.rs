@@ -286,7 +286,7 @@ fn print_event(e: RunEvent) {
     match e {
         RunEvent::Listening(addr) => println!("listening on {addr}"),
         RunEvent::Dialing(target) => println!("connecting to {target}"),
-        RunEvent::Connected { name, remote } => println!("connected to \"{name}\" ({remote})"),
+        RunEvent::Connected { name, remote, .. } => println!("connected to \"{name}\" ({remote})"),
         RunEvent::PeerFound(addr) => println!("found the other machine at its new address {addr}"),
         RunEvent::Role(role) => info!(?role, "role"),
         RunEvent::Ended(end) => println!("session ended: {end:?}"),
