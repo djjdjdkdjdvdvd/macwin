@@ -73,11 +73,13 @@ impl Tr {
 
     /// The first line of the window-mode menu (and the tooltip).
     pub fn status(self, s: &TrayState) -> String {
-        let peer = match &s.peer {
-            Some(p) => self.quoted(&p.name),
-            None => self
-                .p("второй компьютер", "the other computer")
-                .to_string(),
+        let name = s.peer.as_ref().map(|p| self.quoted(&p.name));
+        // A quoted name stays as it is; "the other computer" declines in
+        // Russian, so each phrase brings its own case.
+        let peer = |ru: &str| match (&name, self.0) {
+            (Some(n), _) => n.clone(),
+            (None, Language::Ru) => ru.to_string(),
+            (None, Language::En) => "the other computer".to_string(),
         };
         match &s.phase {
             Phase::Starting => self.p("Запуск…", "Starting…").into(),
@@ -85,27 +87,33 @@ impl Tr {
                 .p("Компьютер не подключён", "No computer is paired")
                 .into(),
             Phase::NeedsSide => self.p("Расставьте экраны", "Arrange the screens").into(),
-            Phase::Listening => self.pick(format!("Ожидание {peer}"), format!("Waiting for {peer}")),
+            Phase::Listening => self.pick(
+                format!("Ожидание {}", peer("второго компьютера")),
+                format!("Waiting for {}", peer("")),
+            ),
             Phase::Connecting => self.pick(
-                format!("Подключение к {peer}…"),
-                format!("Connecting to {peer}…"),
+                format!("Подключение к {}…", peer("второму компьютеру")),
+                format!("Connecting to {}…", peer("")),
             ),
             Phase::Retrying(_) => self.pick(
-                format!("Нет связи с {peer}, пробую снова…"),
-                format!("Lost contact with {peer}, retrying…"),
+                format!("Нет связи с {}, пробую снова…", peer("вторым компьютером")),
+                format!("Lost contact with {}, retrying…", peer("")),
             ),
             Phase::Connected(RoleKind::Idle) => self.pick(
-                format!("Подключено к {peer}"),
-                format!("Connected to {peer}"),
+                format!("Подключено к {}", peer("второму компьютеру")),
+                format!("Connected to {}", peer("")),
             ),
             Phase::Connected(RoleKind::Controlling) => self.pick(
-                format!("Управляете {peer}"),
-                format!("You are controlling {peer}"),
+                format!("Управляете {}", peer("вторым компьютером")),
+                format!("You are controlling {}", peer("")),
             ),
-            Phase::Connected(RoleKind::Controlled) => self.pick(
-                format!("{peer} управляет этим компьютером"),
-                format!("{peer} is controlling this computer"),
-            ),
+            Phase::Connected(RoleKind::Controlled) => {
+                let who = peer("Второй компьютер");
+                self.pick(
+                    format!("{who} управляет этим компьютером"),
+                    format!("{} is controlling this computer", capitalized(&who)),
+                )
+            }
             Phase::Paused => self.p("Пауза", "Paused").into(),
             Phase::EmergencyPaused => self.p("Аварийная пауза", "Emergency pause").into(),
             Phase::PairingWait { code: Some(code) } => {
@@ -274,6 +282,15 @@ impl Tr {
     }
 }
 
+/// `s` with its first letter in upper case.
+fn capitalized(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use macwin_core::types::Os;
@@ -308,7 +325,19 @@ mod tests {
             ..TrayState::default()
         };
         assert_eq!(Tr(Language::En).status(&alone), "Waiting for the other computer");
-        assert_eq!(Tr(Language::Ru).status(&alone), "Ожидание второй компьютер");
+        assert_eq!(Tr(Language::Ru).status(&alone), "Ожидание второго компьютера");
+        let controlled = TrayState {
+            phase: Phase::Connected(RoleKind::Controlled),
+            ..TrayState::default()
+        };
+        assert_eq!(
+            Tr(Language::Ru).status(&controlled),
+            "Второй компьютер управляет этим компьютером"
+        );
+        assert_eq!(
+            Tr(Language::En).status(&controlled),
+            "The other computer is controlling this computer"
+        );
     }
 
     #[test]
