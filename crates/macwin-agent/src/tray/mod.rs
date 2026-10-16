@@ -3,6 +3,11 @@
 //! controller behind it. The OS layer in the platform crates only draws
 //! [`TrayView`]s and reports clicks; everything here is testable without a
 //! screen.
+//!
+//! With the app window, the same controller also serves the window: it
+//! takes [`macwin_ui::UiCommand`]s and the window reads the published
+//! [`TrayState`] (see `crate::window`). The menu then shrinks to "Open
+//! MacWin", the status, pause and quit.
 
 mod control;
 pub mod text;
@@ -10,6 +15,7 @@ pub mod text;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use macwin_core::arrange::{Placement, RectF};
 use macwin_core::types::{Os, RoleKind, Side};
 use macwin_net::pairing::PairingCode;
 use macwin_platform::tray::{
@@ -17,7 +23,10 @@ use macwin_platform::tray::{
 };
 use tokio::sync::mpsc;
 
-pub use control::{DiscoveryTargets, MakeBackends, TrayEnv, start};
+pub use control::{DiscoveryTargets, MakeBackends, PermissionProbe, ScreenProbe, TrayEnv, start};
+
+use crate::config::{Language, Role};
+use text::Tr;
 
 /// Pause or resume sharing.
 pub const ID_PAUSE: u32 = 1;
@@ -35,6 +44,8 @@ pub const ID_PAIR_CANCEL: u32 = 7;
 /// Start at login (on/off).
 pub const ID_AUTOSTART: u32 = 8;
 pub const ID_QUIT: u32 = 9;
+/// Show the app window (window-mode menu only).
+pub const ID_OPEN: u32 = 10;
 
 /// The paired machine, as the menu shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +53,43 @@ pub struct PeerSummary {
     pub name: String,
     pub os: Os,
     pub side: Option<Side>,
+}
+
+/// A screen in its owner's logical units (macOS points, Windows DIPs).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScreenDesc {
+    pub id: u32,
+    pub rect: RectF,
+    pub primary: bool,
+    /// A laptop's own display.
+    pub builtin: bool,
+}
+
+/// The macOS privacy permissions sharing needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PermissionState {
+    pub accessibility: bool,
+    pub input_monitoring: bool,
+}
+
+/// Settings of `config.toml` the window can change, besides the clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    pub images: bool,
+    pub files: bool,
+    pub remap: bool,
+    pub discovery: bool,
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            images: true,
+            files: true,
+            remap: true,
+            discovery: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +120,7 @@ pub enum Phase {
     Quitting,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TrayState {
     pub phase: Phase,
     pub peer: Option<PeerSummary>,
@@ -80,6 +128,21 @@ pub struct TrayState {
     /// `None`: start at login is unavailable.
     pub autostart: Option<bool>,
     pub notice: Option<Notice>,
+    /// The notice reports a failure.
+    pub notice_error: bool,
+    /// This computer's role; `None` until it is chosen.
+    pub role: Option<Role>,
+    pub language: Language,
+    /// Primary (or no role): where this computer puts the peer's screens.
+    /// Secondary: where the primary put this computer, relative to
+    /// `peer_screens`, as its last session announced.
+    pub placement: Option<Placement>,
+    pub options: Options,
+    pub local_screens: Vec<ScreenDesc>,
+    /// The peer's screens from the last session; empty before one.
+    pub peer_screens: Vec<ScreenDesc>,
+    /// `None` where the OS asks for no permissions.
+    pub permissions: Option<PermissionState>,
 }
 
 impl Default for TrayState {
@@ -90,6 +153,14 @@ impl Default for TrayState {
             clipboard: true,
             autostart: None,
             notice: None,
+            notice_error: false,
+            role: None,
+            language: Language::default(),
+            placement: None,
+            options: Options::default(),
+            local_screens: Vec::new(),
+            peer_screens: Vec::new(),
+            permissions: None,
         }
     }
 }
@@ -243,6 +314,46 @@ pub fn render(s: &TrayState) -> TrayView {
         tooltip: format!("macwin: {status}"),
         menu,
         notice: s.notice.clone(),
+    }
+}
+
+/// A peer is paired and placed, so pause and resume mean something.
+fn sharing_possible(s: &TrayState) -> bool {
+    s.peer.is_some() && !matches!(s.phase, Phase::Starting | Phase::NotPaired | Phase::NeedsSide)
+}
+
+/// The menu next to the app window: the status, "Open MacWin", pause and
+/// quit. Notices go to the window, so the tray shows none.
+pub fn render_window(s: &TrayState) -> TrayView {
+    let tr = Tr(s.language);
+    let status = tr.status(s);
+    let quitting = s.phase == Phase::Quitting;
+    let pairing = matches!(s.phase, Phase::PairingWait { .. } | Phase::PairingDial);
+    let paused = matches!(
+        s.phase,
+        Phase::Paused | Phase::EmergencyPaused | Phase::Failed(_)
+    );
+    let mut menu = vec![MenuEntry::Label(shorten(&status, 60))];
+    if let Phase::Retrying(e) | Phase::Failed(e) = &s.phase {
+        menu.push(MenuEntry::Label(shorten(e, 70)));
+    }
+    menu.push(MenuEntry::Separator);
+    menu.push(MenuEntry::Item(
+        MenuItem::new(ID_OPEN, tr.open()).enabled(!quitting),
+    ));
+    let pause = if paused { tr.resume() } else { tr.pause() };
+    menu.push(MenuEntry::Item(
+        MenuItem::new(ID_PAUSE, pause).enabled(sharing_possible(s) && !pairing && !quitting),
+    ));
+    menu.push(MenuEntry::Separator);
+    menu.push(MenuEntry::Item(
+        MenuItem::new(ID_QUIT, tr.quit()).enabled(!quitting),
+    ));
+    TrayView {
+        icon: icon(&s.phase),
+        tooltip: format!("MacWin: {status}"),
+        menu,
+        notice: None,
     }
 }
 
