@@ -3,7 +3,7 @@ members = ["crates/*", "tools/keymap-gen"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.96"
 publish = false
@@ -30,6 +30,7 @@ macwin-net = { path = "crates/macwin-net" }
 macwin-platform = { path = "crates/macwin-platform" }
 macwin-platform-macos = { path = "crates/macwin-platform-macos" }
 macwin-platform-windows = { path = "crates/macwin-platform-windows" }
+macwin-ui = { path = "crates/macwin-ui" }
 
 # Third-party crates: exact pins (design.md §3); Cargo.lock is checked in.
 prost = "=0.14.4"
@@ -69,6 +70,7 @@ objc2-core-graphics = { version = "=0.3.2", default-features = false, features =
     "CGEventTypes",
     "CGGeometry",
     "CGRemoteOperation",
+    "CGDisplayConfiguration",
 ] }
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = [
     "std",
@@ -88,6 +90,9 @@ objc2-app-kit = { version = "=0.3.2", default-features = false, features = [
     "NSPasteboardItem",
     "NSResponder",
     "NSRunningApplication",
+    "NSScreen",
+    "NSGraphics",
+    "NSWorkspace",
     "NSStatusBar",
     "NSStatusBarButton",
     "NSStatusItem",
@@ -97,18 +102,26 @@ objc2-app-kit = { version = "=0.3.2", default-features = false, features = [
 ] }
 objc2-foundation = { version = "=0.3.2", default-features = false, features = [
     "std",
+    "NSAppleEventManager",
     "NSArray",
     "NSData",
     "NSDate",
     "NSDictionary",
     "NSGeometry",
+    "NSNotification",
     "NSProcessInfo",
     "NSRunLoop",
     "NSString",
     "NSTimer",
     "NSURL",
+    "NSValue",
 ] }
 security-framework = { version = "=3.7.0", default-features = false }
+# GUI: OpenGL (glow) renderer and the bundled fonts only; X11 serves Linux
+# development builds. winit is a direct dependency only for its macOS
+# extension traits and stays in lock-step with the version eframe resolves.
+eframe = { version = "=0.37.0", default-features = false, features = ["glow", "default_fonts", "x11"] }
+winit = { version = "=0.30.13", default-features = false }
 windows-sys = { version = "=0.61.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

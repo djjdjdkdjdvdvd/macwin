@@ -4,31 +4,46 @@ A software KVM for one Mac and one Windows PC on the same LAN: either
 machine's keyboard and mouse can drive both screens, and copied text,
 images and files are shared between them.
 
-**Status: Phase 3.** Pairing by a one-time code (the machines find each
-other on the LAN), the identity key in the macOS Keychain / Windows DPAPI,
-keyboard and mouse sharing with smooth trackpad scrolling, clipboard sharing
-of text, images and files, automatic reconnects, a menu bar / notification
-area app, start at login and installable packages are implemented with
-automated tests. Native CI builds and smoke-tests the macOS and Windows packages;
-the real OS backends and the tray UI still need testing on physical hardware.
+**Status: 0.2, test build.** On top of Phase 3 (pairing by a one-time code,
+Keychain / DPAPI identity, keyboard and mouse sharing with smooth scrolling,
+clipboard sharing of text, images and files, reconnects, start at login,
+installable packages), MacWin becomes a normal application: a window with a
+first-run wizard (this computer is the **primary** or the **secondary**), a
+drag-and-drop screen arrangement editor that places the other computer next to
+any of your monitors on any edge, and pairing by entering the secondary's code
+on the primary. The menu bar / notification area icon stays for quick access.
+The window is wired to the agent in one process, and native CI builds, tests
+and packages it on macOS and Windows; the real OS backends and the window still
+need testing on physical hardware.
 
+<p>
+<img src="docs/screenshots/role.png" width="410" alt="First-run wizard: primary or secondary" />
+<img src="docs/screenshots/connected.png" width="410" alt="Main window: the PC to the left of the MacBook, under the large monitor" />
+</p>
+
+Plan and per-stage status: [PLAN.md](PLAN.md) and issue [#10](https://github.com/asintiko/macwin/issues/10) (Russian).
+Next: [PLAN-0.3.md](PLAN-0.3.md) — latency measurement and speed-ups, Linux (Kali) support, several computers (Russian).
 Current progress, verification results and remaining work: [PROGRESS.md](PROGRESS.md) (Russian).
 First-run instructions and the hardware checklist: [FIRST_RUN.md](FIRST_RUN.md) (Russian).
-Test downloads: [v0.1.0-test.1](https://github.com/kojikor/macwin/releases/tag/v0.1.0-test.1).
-The DMG requires macOS 15+ on Apple Silicon; the Windows ZIP contains x64 EXEs
-and `install.cmd`. These are test builds, without distribution signing/notarization.
+Test downloads: [latest release](https://github.com/djjdjdkdjdvdvd/macwin/releases/latest)
+(see [Installing](#installing)). The DMG requires macOS 15+ on Apple Silicon; the
+Windows ZIP contains x64 EXEs and `install.cmd`. Test builds are not
+distribution-signed; the one-line installers below avoid the Gatekeeper and
+SmartScreen prompts, and CI notarizes the Mac build once a Developer ID
+certificate is configured.
 
 ## Workspace
 
 | Path | What it is |
 |---|---|
-| `crates/macwin-core` | Pure logic: vocabulary types, edge-mapping geometry, HID keymap, Ctrl/Cmd remap, pressed-key tracking, heartbeat, emergency chord, the controller state machine (`Engine`), clipboard sync ordering. No I/O, threads or clocks. |
+| `crates/macwin-core` | Pure logic: vocabulary types, screen arrangement (placement, snapping, shared edges) and edge crossing, HID keymap, Ctrl/Cmd remap, pressed-key tracking, heartbeat, emergency chord, the controller state machine (`Engine`), clipboard sync ordering. No I/O, threads or clocks. |
 | `crates/macwin-proto` | Strict protobuf codec (hand-written `prost` derives, no `protoc`), stream framing, version check. |
 | `crates/macwin-net` | QUIC (quinn + rustls/ring) with mutual TLS and SHA-256 certificate pinning; SPAKE2 pairing; identity bundles; the `Link` abstraction. |
 | `crates/macwin-platform` | Backend traits (capture, injection, screens, clipboard, secret store), the tray view model, and in-memory fakes (`testing` feature). |
 | `crates/macwin-platform-macos` | macOS backend: CGEventTap capture, CGEventPost injection, displays, NSPasteboard, login keychain, menu bar item (empty on other OSes). |
 | `crates/macwin-platform-windows` | Windows backend: low-level hooks, SendInput, per-monitor-v2 DPI, Win32 clipboard, DPAPI, `Run` key, notification area icon (empty on other OSes). |
-| `crates/macwin-agent` | Session driver, reconnecting runner, LAN discovery use, tray controller, config (library) and the `macwin` / `macwin-tray` binaries. |
+| `crates/macwin-ui` | The application window (egui/eframe with OpenGL): first-run wizard, arrangement editor, status and settings. Talks to the agent through its `Backend` trait; `examples/demo.rs` runs it with a fake backend. |
+| `crates/macwin-agent` | Session driver, reconnecting runner, LAN discovery use, the controller behind the window and the tray, config (library) and the `macwin` / `macwin-tray` binaries. |
 | `scripts/macos` | Builds and signs `target/MacWin.app`, packs it into a dmg, runs it through LaunchServices, stops it. |
 | `scripts/windows` | Builds the Windows zip; `install.ps1` / `uninstall.ps1` inside it. |
 | `tools/keymap-gen` | Generates the HID <-> macOS keycode <-> Windows scancode table from Chromium data. |
@@ -58,54 +73,92 @@ Windows CI builds natively with MSVC.
 ### Packages
 
 ```sh
-scripts/macos/dmg.sh          # target/MacWin-<version>.dmg (builds and signs MacWin.app)
+scripts/macos/dmg.sh          # target/MacWin-<version>-macos-arm64.dmg (builds and signs MacWin.app)
 scripts/windows/package.sh    # target/MacWin-<version>-windows-x64.exe + target/macwin-<version>-windows-x64.zip
 ```
 
-CI is configured to build both and keep artifacts of the `package` jobs for
-14 days. Check [PROGRESS.md](PROGRESS.md) for the current CI status; configuration
-alone does not mean the packages have passed verification.
-Neither is notarized or code-signed for distribution:
-Gatekeeper and SmartScreen warn on first launch.
+CI builds both and keeps artifacts of the `package` jobs for 14 days; a pushed
+tag `v*` publishes them as a GitHub release with stable names
+(`MacWin-macos-arm64.dmg`, `MacWin-windows-x64.zip`, `MacWin-windows-x64.exe`,
+`install-macos.sh`, `install-windows.ps1`, `SHA256SUMS.txt`). Check
+[PROGRESS.md](PROGRESS.md) for the current CI status.
+
+**Signing.** Without secrets the Mac build is signed ad-hoc. With the
+repository secrets `MACOS_CERTIFICATE_P12` (a base64 "Developer ID
+Application" certificate and key) and `MACOS_CERTIFICATE_PASSWORD`, CI signs
+with the Hardened Runtime; with `APPLE_ID`, `APPLE_TEAM_ID` and
+`APPLE_APP_PASSWORD` (an app-specific password) it also notarizes and staples
+the dmg, which then opens on any Mac without a Gatekeeper prompt. Locally:
+`MACWIN_SIGN_IDENTITY="Developer ID Application: …" scripts/macos/dmg.sh` with
+`MACWIN_NOTARY_PROFILE` or the same variables. The Windows programs are not
+signed.
 
 ## Installing
 
-- **Mac:** open the dmg and double-click `Install MacWin.command` (or drag
-  `MacWin.app` to Applications and run `xattr -cr /Applications/MacWin.app`
-  so Gatekeeper does not show "Cannot verify MacWin"). Open MacWin: it lives
-  in the menu bar (no Dock icon). Grant the permissions described in
-  [macOS permissions](#macos-app-bundle-and-permissions).
-- **Windows (single EXE, no archive):** download `MacWin-<version>-windows-x64.exe`
-  and double-click it to start the tray icon directly (supports pairing,
-  clipboard/file sharing and "Start at Login" without extracting a ZIP).
+- **Mac** (macOS 15+, Apple Silicon), in Terminal:
+
+  ```sh
+  curl -fsSL https://github.com/djjdjdkdjdvdvd/macwin/releases/latest/download/install-macos.sh | bash
+  ```
+
+  It downloads the dmg (curl does not quarantine it, so Gatekeeper does not
+  ask), quits a running MacWin, installs `/Applications/MacWin.app`, signs a
+  test build for this Mac, resets the Accessibility / Input Monitoring entries
+  if the signature changed (macOS would otherwise keep a stale, non-working
+  grant) and opens MacWin. The same script is `Install MacWin.command` in the
+  dmg. A notarized dmg can simply be dragged to Applications. Then grant the
+  permissions described in [macOS permissions](#macos-app-bundle-and-permissions);
+  the window shows their state and opens the right page of System Settings.
+- **Windows** (x64), in PowerShell:
+
+  ```powershell
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/djjdjdkdjdvdvd/macwin/releases/latest/download/install-windows.ps1 | iex"
+  ```
+
+  It downloads the zip without the "downloaded from the internet" mark (so
+  SmartScreen does not stop the unsigned build), checks it against
+  `SHA256SUMS.txt` and runs its `install.ps1` (below).
 - **Windows (full installer ZIP):** extract the zip and double-click `install.cmd` (it runs
   `install.ps1`). It installs for the current user in
-  `%LOCALAPPDATA%\Programs\macwin`, adds that folder to PATH, starts macwin
-  at login, allows UDP 47800-47801 through Windows Firewall on private
-  networks (one administrator prompt; `-AllNetworks` adds Public networks)
-  and starts the notification area icon. `uninstall.ps1` removes it again;
-  `-Purge` also deletes settings, identity, logs and received files. The installed
-  uninstaller defaults to its own folder, including custom locations; unrelated
-  files in that folder are kept.
+  `%LOCALAPPDATA%\Programs\macwin`, adds that folder to PATH and MacWin to the
+  Start menu, starts MacWin in the background at login, allows UDP 47800-47801
+  through Windows Firewall on private networks (one administrator prompt;
+  `-AllNetworks` adds Public networks) and opens the MacWin window.
+  `uninstall.ps1` removes it again; `-Purge` also deletes settings, identity,
+  logs and received files. The installed uninstaller defaults to its own
+  folder, including custom locations; unrelated files in that folder are kept.
+- **Windows (single EXE, no installation):** `MacWin-windows-x64.exe` runs the
+  app directly from where it is.
 
 ## Usage
 
-The tray app (MacWin.app in the menu bar, `macwin-tray.exe` in the Windows
-notification area, or `macwin tray`) does everything below from its menu.
-The same works from the command line; on a Mac, run commands through the
-signed app bundle (`scripts/macos/run.sh <command>`, see below) so that macOS
-grants its permissions and keychain access to MacWin.app.
+Open MacWin (MacWin.app, the Start menu entry, `macwin-tray.exe` or
+`macwin tray`): the window does everything below. Closing it keeps MacWin
+running in the menu bar / notification area; **Open MacWin…** in the icon's menu
+(on Windows also a click on the icon, or launching MacWin again) brings it back.
+At login MacWin starts in the background without a window (`macwin tray
+--background`, `macwin-tray.exe --background`). The same works from the command line; on a
+Mac, run commands through the signed app bundle (`scripts/macos/run.sh
+<command>`, see below) so that macOS grants its permissions and keychain access
+to MacWin.app.
 
 ### 1. Pair the machines (once)
 
-In the menu of one machine choose **Pair with another computer…**: it shows
-a code. On the other machine choose **Enter pairing code…** and type it.
-The machines find each other on the local network; then choose where the
-other machine's screens are (**Other computer is on the left / right**).
+On the computer whose keyboard and mouse you want to use, choose **Primary**
+in the first-run wizard. The next step shows your monitors as they are arranged
+in the OS; drag the other computer to where it stands on the desk (it snaps to
+the nearest monitor edge; the highlighted line is where the cursor will cross)
+and continue. On the other computer choose **Secondary**: it shows a code.
+Enter that code on the primary. The secondary receives the arrangement from the
+primary with every connection, so it never asks for a side, and its own mouse
+can cross back through the same edge. The arrangement can be changed later on
+the primary's **Arrangement** tab, which then shows the other computer's real
+screens.
 
 Discovery uses IPv4 broadcast and may not cross VPNs, subnets or Wi-Fi client
-isolation. If it fails, enter the address and code from the other machine's
-notice in the same dialog, for example `192.168.1.20:47800 123-456`. Both
+isolation. If it fails, choose **Enter the address manually** on the primary
+and type the address shown under the secondary's code, for example
+`192.168.1.20:47800`. Both
 machines must still be reachable over the network; this does not bypass a
 firewall or client isolation.
 
