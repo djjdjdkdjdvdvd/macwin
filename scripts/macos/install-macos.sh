@@ -81,19 +81,28 @@ if [[ -d "$DST" ]]; then
     old_hash="$(cdhash "$DST" || true)"
 fi
 
+running() { pgrep -f "$EXE" >/dev/null 2>&1; }
+# Waits up to $1 tenths of a second for MacWin to exit.
+wait_exit() {
+    for _ in $(seq 1 "$1"); do
+        running || return 0
+        sleep 0.1
+    done
+    ! running
+}
+
 # Quit a running MacWin the normal way, so it stops sharing and releases the
-# keyboard and mouse; force it only if it does not stop.
-if pgrep -f "$EXE" >/dev/null 2>&1; then
+# keyboard and mouse: the Quit command, then Ctrl+C (SIGINT, which MacWin
+# also handles); force it only if neither works.
+if running; then
     say "Quitting the running MacWin…"
     osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
-    for _ in $(seq 1 50); do
-        pgrep -f "$EXE" >/dev/null 2>&1 || break
-        sleep 0.2
-    done
-    if pgrep -f "$EXE" >/dev/null 2>&1; then
-        pkill -TERM -f "$EXE" 2>/dev/null || true
-        sleep 1
-        pkill -KILL -f "$EXE" 2>/dev/null || true
+    if ! wait_exit 80; then
+        pkill -INT -f "$EXE" 2>/dev/null || true
+        if ! wait_exit 80; then
+            pkill -KILL -f "$EXE" 2>/dev/null || true
+            wait_exit 20 || die "cannot quit the running MacWin; quit it from the menu bar and run this again"
+        fi
     fi
 fi
 
