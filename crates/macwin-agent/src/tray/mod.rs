@@ -3,6 +3,11 @@
 //! controller behind it. The OS layer in the platform crates only draws
 //! [`TrayView`]s and reports clicks; everything here is testable without a
 //! screen.
+//!
+//! With the app window, the same controller also serves the window: it
+//! takes [`macwin_ui::UiCommand`]s and the window reads the published
+//! [`TrayState`] (see `crate::window`). The menu then shrinks to "Open
+//! MacWin", the status, pause and quit.
 
 mod control;
 pub mod text;
@@ -10,6 +15,7 @@ pub mod text;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use macwin_core::arrange::{Placement, RectF};
 use macwin_core::types::{Os, RoleKind, Side};
 use macwin_net::pairing::PairingCode;
 use macwin_platform::tray::{
@@ -17,7 +23,10 @@ use macwin_platform::tray::{
 };
 use tokio::sync::mpsc;
 
-pub use control::{DiscoveryTargets, MakeBackends, TrayEnv, start};
+pub use control::{DiscoveryTargets, MakeBackends, PermissionProbe, ScreenProbe, TrayEnv, start};
+
+use crate::config::{Language, Role};
+use text::Tr;
 
 /// Pause or resume sharing.
 pub const ID_PAUSE: u32 = 1;
