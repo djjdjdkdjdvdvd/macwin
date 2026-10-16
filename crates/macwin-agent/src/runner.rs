@@ -79,6 +79,10 @@ pub enum RunEvent {
     Connected {
         name: String,
         remote: SocketAddr,
+        /// The peer's screens, from its Hello.
+        screens: Vec<ScreenInfo>,
+        /// Where the peer (a primary) put this computer, from its Hello.
+        placement: Option<Placement>,
     },
     /// The peer answered a discovery query from a new address and the
     /// session there is up; later dials use that address.
@@ -363,6 +367,8 @@ pub async fn run(
         on_event(RunEvent::Connected {
             name: session.peer.device_name.clone(),
             remote: session.remote,
+            screens: session.peer.screens.clone(),
+            placement: session.peer.placement,
         });
         let handle = match spawn_session(
             opts.session.clone(),
