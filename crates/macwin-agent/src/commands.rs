@@ -321,17 +321,15 @@ pub async fn run() -> anyhow::Result<()> {
     let peer = config.peer.clone().context(
         "not paired yet: run `macwin pair` on one machine and the command it prints on the other",
     )?;
-    let side = peer
-        .side
-        .context("tell macwin where the peer's screens are: macwin config set side left|right")?;
+    // A secondary follows the placement its primary announces.
+    let placement = config.session_placement().map_err(|_| {
+        anyhow!(
+            "tell macwin where the peer's screens are: arrange them in the MacWin window, or run \
+             macwin config set side left|right"
+        )
+    })?;
     let staging = staging_dir()?;
-    let session = session_config(
-        &config,
-        os,
-        device_name(),
-        Some(Placement::side(side)),
-        staging,
-    );
+    let session = session_config(&config, os, device_name(), placement, staging);
     let with_clipboard = session.clipboard.is_some();
     let sharing = match &session.clipboard {
         None => "off".to_string(),
