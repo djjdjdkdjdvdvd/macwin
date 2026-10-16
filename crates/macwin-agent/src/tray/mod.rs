@@ -3,6 +3,11 @@
 //! controller behind it. The OS layer in the platform crates only draws
 //! [`TrayView`]s and reports clicks; everything here is testable without a
 //! screen.
+//!
+//! With the app window, the same controller also serves the window: it
+//! takes [`macwin_ui::UiCommand`]s and the window reads the published
+//! [`TrayState`] (see `crate::window`). The menu then shrinks to "Open
+//! MacWin", the status, pause and quit.
 
 mod control;
 pub mod text;
@@ -10,6 +15,7 @@ pub mod text;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use macwin_core::arrange::{Placement, RectF};
 use macwin_core::types::{Os, RoleKind, Side};
 use macwin_net::pairing::PairingCode;
 use macwin_platform::tray::{
@@ -17,7 +23,10 @@ use macwin_platform::tray::{
 };
 use tokio::sync::mpsc;
 
-pub use control::{DiscoveryTargets, MakeBackends, TrayEnv, start};
+pub use control::{DiscoveryTargets, MakeBackends, PermissionProbe, ScreenProbe, TrayEnv, start};
+
+use crate::config::{Language, Role};
+use text::Tr;
 
 /// Pause or resume sharing.
 pub const ID_PAUSE: u32 = 1;
@@ -35,6 +44,8 @@ pub const ID_PAIR_CANCEL: u32 = 7;
 /// Start at login (on/off).
 pub const ID_AUTOSTART: u32 = 8;
 pub const ID_QUIT: u32 = 9;
+/// Show the app window (window-mode menu only).
+pub const ID_OPEN: u32 = 10;
 
 /// The paired machine, as the menu shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +53,43 @@ pub struct PeerSummary {
     pub name: String,
     pub os: Os,
     pub side: Option<Side>,
+}
+
+/// A screen in its owner's logical units (macOS points, Windows DIPs).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScreenDesc {
+    pub id: u32,
+    pub rect: RectF,
+    pub primary: bool,
+    /// A laptop's own display.
+    pub builtin: bool,
+}
+
+/// The macOS privacy permissions sharing needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PermissionState {
+    pub accessibility: bool,
+    pub input_monitoring: bool,
+}
+
+/// Settings of `config.toml` the window can change, besides the clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    pub images: bool,
+    pub files: bool,
+    pub remap: bool,
+    pub discovery: bool,
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            images: true,
+            files: true,
+            remap: true,
+            discovery: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
